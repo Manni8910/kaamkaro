@@ -10,7 +10,7 @@ const {
 } = require("./helpers");
 
 async function clickSave(page) {
-  await page.locator("#appHeader [data-save-profile-edit], #profileEdit [data-save-profile-edit]").filter({ visible: true }).first().click();
+  await page.locator("#profileEditBody [data-save-profile-edit]").filter({ visible: true }).click();
 }
 
 async function clickEditBack(page) {
@@ -38,12 +38,24 @@ test.describe("profile/settings edit mode navigation", () => {
 
     await page.locator('#profile [data-edit-profile="workerAge"]').click();
     await expectActiveScreen(page, "profileEdit");
+    await expect(page.locator("#profileEditInput")).toHaveValue("25");
+    await expect(page.locator("#profileEditBody [data-save-profile-edit]")).toContainText("Save Changes");
+    await expect(page.locator("#profileEditBody [data-cancel-profile-edit]")).toContainText("Cancel");
     await page.locator("#profileEditInput").fill("30");
+    await clickSave(page);
+    await expectActiveScreen(page, "profile");
+    await expect(page.locator("#workerProfileAgeText")).toContainText("30 years");
+    let state = await page.evaluate(() => JSON.parse(localStorage.getItem("kkState")));
+    expect(state.worker.age).toBe("30");
+
+    await page.locator('#profile [data-edit-profile="workerAge"]').click();
+    await expect(page.locator("#profileEditInput")).toHaveValue("30");
+    await page.locator("#profileEditInput").fill("31");
     await clickEditBack(page);
     await expectActiveScreen(page, "profile");
     await expectNoAuthOrSetupScreen(page);
-    let state = await page.evaluate(() => JSON.parse(localStorage.getItem("kkState")));
-    expect(state.worker.age).toBe("25");
+    state = await page.evaluate(() => JSON.parse(localStorage.getItem("kkState")));
+    expect(state.worker.age).toBe("30");
 
     await go(page, "accountSettings");
     await page.locator('#accountSettings [data-edit-profile="accountName"]').click();
