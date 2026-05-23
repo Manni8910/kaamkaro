@@ -537,6 +537,15 @@ html[lang="hi"] .scene-panel {
 }
 .top-save:disabled { color: var(--muted); opacity: .5; }
 .edit-stack { display: grid; gap: 14px; }
+.profile-edit-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.35fr;
+  gap: 10px;
+  margin-top: 2px;
+}
+.profile-edit-actions .btn {
+  min-height: 52px;
+}
 .edit-card {
   padding: 16px;
   border-radius: 22px;
