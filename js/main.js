@@ -1444,7 +1444,13 @@
   }
   function markEditDirty() {
     editDirty = true;
-    if (byId("profileEditSaveTop")) byId("profileEditSaveTop").disabled = false;
+    document.querySelectorAll("[data-save-profile-edit]").forEach(function (button) { button.disabled = false; });
+  }
+  function profileEditActionsHtml() {
+    return '<div class="profile-edit-actions"><button class="btn outline" data-cancel-profile-edit>Cancel</button><button class="btn primary" data-save-profile-edit ' + (editDirty ? "" : "disabled") + '>Save Changes</button></div>';
+  }
+  function setProfileEditSaveState() {
+    document.querySelectorAll("[data-save-profile-edit]").forEach(function (button) { button.disabled = !editDirty; });
   }
   function openProfileEdit(field, options) {
     editingProfileField = field;
@@ -1470,7 +1476,7 @@
   function renderProfileEdit() {
     if (!byId("profileEditBody")) return;
     var cfg = profileEditConfig(editingProfileField);
-    if (byId("profileEditSaveTop")) byId("profileEditSaveTop").disabled = !editDirty;
+    setProfileEditSaveState();
     if (!editingProfileField) return;
     var body = byId("profileEditBody");
     if (cfg.type === "skills") {
@@ -1478,22 +1484,23 @@
       body.innerHTML =
         '<div class="edit-card"><div class="section-label">Your Skills</div><div class="edit-chip-row">' + (editDraft.skills || []).map(function (skill) { return '<button class="edit-chip selected skill-remove" data-edit-remove-skill="' + skill + '">' + skill + '<span>x</span></button>'; }).join("") + '</div></div>' +
         '<div class="edit-card"><label>Add Skills</label><div class="input"><input id="profileEditInput" placeholder="Type a skill"></div><button class="btn outline mt" data-edit-add-skill>+ Add Skill</button></div>' +
-        '<div class="edit-card"><div class="section-label">Suggested Skills</div><div class="edit-chip-row">' + suggested.map(function (skill) { return '<button class="edit-chip ' + ((editDraft.skills || []).indexOf(skill) >= 0 ? "selected" : "") + '" data-edit-suggest-skill="' + skill + '">' + skill + '</button>'; }).join("") + '</div></div>';
+        '<div class="edit-card"><div class="section-label">Suggested Skills</div><div class="edit-chip-row">' + suggested.map(function (skill) { return '<button class="edit-chip ' + ((editDraft.skills || []).indexOf(skill) >= 0 ? "selected" : "") + '" data-edit-suggest-skill="' + skill + '">' + skill + '</button>'; }).join("") + '</div></div>' +
+        profileEditActionsHtml();
       return;
     }
     if (cfg.type === "experience") {
       var exp = ["No experience","Less than 1 year","1-2 years","2-5 years","5+ years"];
-      body.innerHTML = '<div class="edit-card">' + exp.map(function (item) { var selected = editDraft.value === item || (!editDraft.value && item === "No experience"); return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-option="' + item + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span>' + item + '</button>'; }).join("") + '</div>';
+      body.innerHTML = '<div class="edit-card">' + exp.map(function (item) { var selected = editDraft.value === item || (!editDraft.value && item === "No experience"); return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-option="' + item + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span>' + item + '</button>'; }).join("") + '</div>' + profileEditActionsHtml();
       return;
     }
     if (cfg.type === "gender") {
       var genders = ["Male","Female","Other","Prefer not to say"];
-      body.innerHTML = '<div class="edit-card">' + genders.map(function (item) { var selected = editDraft.value === item; return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-option="' + item + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span>' + item + '</button>'; }).join("") + '</div>';
+      body.innerHTML = '<div class="edit-card">' + genders.map(function (item) { var selected = editDraft.value === item; return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-option="' + item + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span>' + item + '</button>'; }).join("") + '</div>' + profileEditActionsHtml();
       return;
     }
     if (cfg.type === "work") {
       var types = ["Full-time","Part-time","Contract","Temporary","Internship"];
-      body.innerHTML = '<div class="edit-card">' + types.map(function (item) { var selected = (editDraft.workTypes || []).indexOf(item) >= 0; return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-work="' + item + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span>' + item + '</button>'; }).join("") + '</div>';
+      body.innerHTML = '<div class="edit-card">' + types.map(function (item) { var selected = (editDraft.workTypes || []).indexOf(item) >= 0; return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-work="' + item + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span>' + item + '</button>'; }).join("") + '</div>' + profileEditActionsHtml();
       return;
     }
     if (cfg.type === "availability") {
@@ -1504,17 +1511,19 @@
       body.innerHTML =
         '<div class="edit-card"><div class="section-label">Start Availability</div>' + starts.map(function (start) { var selected = editDraft.start === start; return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-start="' + start + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span>' + start + '</button>'; }).join("") + '</div>' +
         '<div class="edit-card"><div class="section-label">Days</div><button class="option-row ' + (allSelected ? "selected" : "") + '" data-edit-all-days><span class="option-dot">' + (allSelected ? "OK" : "") + '</span>Select All Days</button><div class="grid mt">' + days.map(function (day) { var selected = (editDraft.days || []).indexOf(day) >= 0; return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-day="' + day + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span>' + day + '</button>'; }).join("") + '</div></div>' +
-        '<div class="edit-card"><div class="section-label">Shift preference</div>' + shifts.map(function (shift) { var selected = editDraft.shift === shift; return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-shift="' + shift + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span>' + shift + '</button>'; }).join("") + '</div>';
+        '<div class="edit-card"><div class="section-label">Shift preference</div>' + shifts.map(function (shift) { var selected = editDraft.shift === shift; return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-shift="' + shift + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span>' + shift + '</button>'; }).join("") + '</div>' +
+        profileEditActionsHtml();
       return;
     }
     if (cfg.type === "location") {
       var suggestions = locationMatches(editDraft.value || "");
       body.innerHTML =
         '<div class="edit-card"><label>' + cfg.label + '</label><div class="input"><input id="profileEditInput" placeholder="City, district, state" value="' + (editDraft.value || "") + '" data-location-input="profileEdit"></div></div>' +
-        '<div class="edit-card"><div class="section-label">Suggestions</div>' + suggestions.map(function (loc) { var selected = editDraft.value === loc.formatted_location || editDraft.value === formatLocationLabel(loc); return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-location="' + loc.place_id + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span><span><b>' + escapeHtml(formatLocationLabel(loc)) + '</b><br><span class="small">' + escapeHtml(loc.formatted_location) + '</span></span></button>'; }).join("") + '</div>';
+        '<div class="edit-card"><div class="section-label">Suggestions</div>' + suggestions.map(function (loc) { var selected = editDraft.value === loc.formatted_location || editDraft.value === formatLocationLabel(loc); return '<button class="option-row ' + (selected ? "selected" : "") + '" data-edit-location="' + loc.place_id + '"><span class="option-dot">' + (selected ? "OK" : "") + '</span><span><b>' + escapeHtml(formatLocationLabel(loc)) + '</b><br><span class="small">' + escapeHtml(loc.formatted_location) + '</span></span></button>'; }).join("") + '</div>' +
+        profileEditActionsHtml();
       return;
     }
-    body.innerHTML = '<div class="edit-card"><label>' + cfg.label + '</label><div class="input"><input id="profileEditInput" ' + (cfg.type === "number" ? 'inputmode="numeric" ' : '') + 'placeholder="Type here" value="' + (editDraft.value || "") + '"></div></div>';
+    body.innerHTML = '<div class="edit-card"><label>' + cfg.label + '</label><div class="input"><input id="profileEditInput" ' + (cfg.type === "number" ? 'inputmode="numeric" ' : '') + 'placeholder="Type here" value="' + (editDraft.value || "") + '"></div></div>' + profileEditActionsHtml();
   }
   async function saveProfileEdit() {
     var input = byId("profileEditInput");
@@ -2619,6 +2628,10 @@
     }
     if (event.target.closest("[data-save-profile-edit]")) {
       await saveProfileEdit();
+      return;
+    }
+    if (event.target.closest("[data-cancel-profile-edit]")) {
+      returnFromEditMode();
       return;
     }
     var accountProfile = event.target.closest("[data-account-profile]");
