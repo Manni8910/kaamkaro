@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/((?!maintenance\\.html|assets|css|js|favicon).*)", "destination": "/maintenance.html" }
+  ]
+}
