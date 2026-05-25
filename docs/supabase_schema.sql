@@ -120,6 +120,29 @@ create trigger worker_profiles_set_updated_at
 before update on public.worker_profiles
 for each row execute function public.set_updated_at();
 
+create table if not exists public.worker_swipe_limits (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  worker_id uuid references public.worker_profiles(id) on delete cascade,
+  swipe_date date not null,
+  daily_swipe_count integer not null default 0 check (daily_swipe_count >= 0),
+  total_swipes_today integer not null default 0 check (total_swipes_today >= 0),
+  daily_limit integer not null default 25 check (daily_limit > 0),
+  cooldown_level integer not null default 0 check (cooldown_level between 0 and 3),
+  cooldown_until timestamptz,
+  reset_at timestamptz not null,
+  plan text not null default 'free' check (plan in ('free', 'plus')),
+  worker_plus_enabled boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, swipe_date)
+);
+
+drop trigger if exists worker_swipe_limits_set_updated_at on public.worker_swipe_limits;
+create trigger worker_swipe_limits_set_updated_at
+before update on public.worker_swipe_limits
+for each row execute function public.set_updated_at();
+
 create table if not exists public.employer_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique references public.users(id) on delete cascade,
@@ -821,6 +844,9 @@ create index if not exists idx_users_device_id on public.users(device_id);
 create index if not exists idx_users_ip_hash on public.users(ip_hash);
 create index if not exists idx_users_risk_score on public.users(risk_score);
 create index if not exists idx_worker_profiles_user_id on public.worker_profiles(user_id);
+create index if not exists idx_worker_swipe_limits_user_date on public.worker_swipe_limits(user_id, swipe_date);
+create index if not exists idx_worker_swipe_limits_worker_date on public.worker_swipe_limits(worker_id, swipe_date);
+create index if not exists idx_worker_swipe_limits_cooldown_until on public.worker_swipe_limits(cooldown_until);
 create index if not exists idx_employer_profiles_user_id on public.employer_profiles(user_id);
 create index if not exists idx_jobs_employer_id on public.jobs(employer_id);
 create index if not exists idx_jobs_city on public.jobs(city);
@@ -858,6 +884,7 @@ on conflict (id) do nothing;
 alter table public.users enable row level security;
 alter table public.admin_users enable row level security;
 alter table public.worker_profiles enable row level security;
+alter table public.worker_swipe_limits enable row level security;
 alter table public.employer_profiles enable row level security;
 alter table public.jobs enable row level security;
 alter table public.applications enable row level security;
@@ -906,6 +933,18 @@ for select using (
 drop policy if exists "worker_profiles_manage_own" on public.worker_profiles;
 create policy "worker_profiles_manage_own" on public.worker_profiles
 for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists "worker_swipe_limits_select_own_or_admin" on public.worker_swipe_limits;
+create policy "worker_swipe_limits_select_own_or_admin" on public.worker_swipe_limits
+for select using (user_id = auth.uid() or public.is_admin());
+
+drop policy if exists "worker_swipe_limits_insert_own" on public.worker_swipe_limits;
+create policy "worker_swipe_limits_insert_own" on public.worker_swipe_limits
+for insert with check (user_id = auth.uid());
+
+drop policy if exists "worker_swipe_limits_update_own" on public.worker_swipe_limits;
+create policy "worker_swipe_limits_update_own" on public.worker_swipe_limits
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 drop policy if exists "employer_profiles_select_allowed" on public.employer_profiles;
 create policy "employer_profiles_select_allowed" on public.employer_profiles
