@@ -38,6 +38,14 @@
   var setupReturnRoute = localStorage.getItem("kkSetupReturnRoute") || "";
   var isEditMode = false;
   var editReturnScreen = "";
+  var profileEditMode = "";
+  var swipeCooldownTimer = null;
+  var swipeLimitHydrateKey = "";
+  var WORKER_PLUS_ENABLED = false;
+  var workerSwipePlans = {
+    free: { dailyLimit: 25, cooldowns: [2 * 3600000, 8 * 3600000], workerPlusEnabled: WORKER_PLUS_ENABLED },
+    plus: { dailyLimit: 25, cooldowns: [2 * 3600000, 8 * 3600000], workerPlusEnabled: false }
+  };
 
   function isLocalPrototype() {
     return window.location.protocol === "file:" ||
@@ -75,6 +83,7 @@
       moderationLogs: [],
       reports: [],
       ratings: [],
+      workerSwipeLimits: {},
       blockedPairs: [],
       businessProfiles: {},
       workerProfiles: {},
@@ -107,7 +116,8 @@
     applications: [],
     conversations: [],
     messages: [],
-    notifications: []
+    notifications: [],
+    workerSwipeLimits: {}
   };
   state.worker = state.worker || { id: "john", name: "", gender: "", age: "", city: "", experience: "", skills: [], availability: "", preferredJob: "Any Job", preferredType: "Full-time", bio: "", phoneVerified: true };
   state.worker.id = state.worker.id || "john";
@@ -121,6 +131,7 @@
   state.moderationLogs = state.moderationLogs || [];
   state.reports = state.reports || [];
   state.ratings = state.ratings || [];
+  state.workerSwipeLimits = state.workerSwipeLimits || {};
   state.blockedPairs = state.blockedPairs || [];
   state.postingHistory = state.postingHistory || [];
   state.conversations = state.conversations || [];
@@ -259,6 +270,7 @@
     state.conversations = Array.isArray(state.conversations) ? state.conversations : [];
     state.messages = Array.isArray(state.messages) ? state.messages : [];
     state.notifications = Array.isArray(state.notifications) ? state.notifications : [];
+    state.workerSwipeLimits = state.workerSwipeLimits || {};
     if (!sameAccount) {
       activeCity = state.user.city || "";
       selectedConversationId = null;
@@ -289,6 +301,7 @@
       if (window.KaamKaroJobs && window.KaamKaroJobs.hydrateJobs) await window.KaamKaroJobs.hydrateJobs(state);
       if (window.KaamKaroApplications && window.KaamKaroApplications.hydrateApplications) await window.KaamKaroApplications.hydrateApplications(state);
       if (window.KaamKaroChat && window.KaamKaroChat.hydrateChats) await window.KaamKaroChat.hydrateChats(state);
+      await hydrateSwipeLimitRemote(true);
       if (!remote) return;
       save();
       render();
@@ -343,6 +356,34 @@
       return savedApp;
     } catch (error) {
       console.warn("Application Supabase save failed:", error);
+      return null;
+    }
+  }
+  async function hydrateSwipeLimitRemote(force) {
+    if (!window.KaamKaroSwipeLimits || !window.KaamKaroSwipeLimits.loadSwipeLimit) return null;
+    var identity = workerSwipeIdentity();
+    var dateKey = indiaDateKey();
+    var hydrateKey = [identity.userId, identity.workerId, dateKey].join("|");
+    if (!force && swipeLimitHydrateKey === hydrateKey) return null;
+    swipeLimitHydrateKey = hydrateKey;
+    try {
+      var remoteRecord = await window.KaamKaroSwipeLimits.loadSwipeLimit(identity, dateKey);
+      if (!remoteRecord) return null;
+      var localKey = swipeLimitRecordKey(identity, dateKey);
+      state.workerSwipeLimits[localKey] = normalizeSwipeLimitRecord(remoteRecord, identity, dateKey);
+      save();
+      return state.workerSwipeLimits[localKey];
+    } catch (error) {
+      console.warn("Swipe limit Supabase hydrate failed:", error);
+      return null;
+    }
+  }
+  async function saveSwipeLimitRemote(record) {
+    if (!window.KaamKaroSwipeLimits || !window.KaamKaroSwipeLimits.saveSwipeLimit) return null;
+    try {
+      return await window.KaamKaroSwipeLimits.saveSwipeLimit(record);
+    } catch (error) {
+      console.warn("Swipe limit Supabase save failed:", error);
       return null;
     }
   }
@@ -644,6 +685,7 @@
   function clearEditMode() {
     isEditMode = false;
     editReturnScreen = "";
+    profileEditMode = "";
     editingProfileField = "";
     editDraft = {};
     editDirty = false;
@@ -785,6 +827,169 @@
     if (applied && appliedToday > 0 && appliedToday % 3 === 0) {
       setTimeout(function () { toast(appliedToday + " jobs applied today \uD83D\uDD25"); }, 850);
     }
+  }
+  function indiaDateParts(date) {
+    var parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(date || new Date());
+    var out = {};
+    parts.forEach(function (part) {
+      if (part.type !== "literal") out[part.type] = part.value;
+    });
+    return out;
+  }
+  function indiaDateKey(ms) {
+    var parts = indiaDateParts(new Date(ms || Date.now()));
+    return [parts.year, parts.month, parts.day].join("-");
+  }
+  function nextIndiaResetMs(ms) {
+    var now = ms || Date.now();
+    var parts = indiaDateParts(new Date(now));
+    var reset = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), 18, 30, 0, 0);
+    return reset <= now ? reset + 86400000 : reset;
+  }
+  function isUuid(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+  }
+  function workerSwipeIdentity() {
+    var profile = currentWorkerProfile();
+    return {
+      userId: state.user && state.user.id ? state.user.id : "",
+      workerId: (profile && (profile.workerId || profile.id)) || state.defaultWorkerId || (state.worker && state.worker.id) || ""
+    };
+  }
+  function swipeLimitRecordKey(identity, dateKey) {
+    identity = identity || workerSwipeIdentity();
+    return ["worker-swipe", identity.userId || "local-user", identity.workerId || "local-worker", dateKey || indiaDateKey()].join(":");
+  }
+  function swipeLimitPlan() {
+    return WORKER_PLUS_ENABLED && state.user && state.user.workerPlusEnabled ? workerSwipePlans.plus : workerSwipePlans.free;
+  }
+  function makeSwipeLimitRecord(identity, dateKey) {
+    var plan = swipeLimitPlan();
+    var now = Date.now();
+    return {
+      id: "",
+      user_id: identity.userId || "",
+      worker_id: identity.workerId || "",
+      swipe_date: dateKey || indiaDateKey(now),
+      daily_swipe_count: 0,
+      total_swipes_today: 0,
+      daily_limit: plan.dailyLimit,
+      cooldown_level: 0,
+      cooldown_until: null,
+      reset_at: new Date(nextIndiaResetMs(now)).toISOString(),
+      plan: "free",
+      worker_plus_enabled: false,
+      created_at: new Date(now).toISOString(),
+      updated_at: new Date(now).toISOString()
+    };
+  }
+  function normalizeSwipeLimitRecord(record, identity, dateKey) {
+    identity = identity || workerSwipeIdentity();
+    dateKey = dateKey || indiaDateKey();
+    var now = Date.now();
+    var plan = swipeLimitPlan();
+    var nextReset = nextIndiaResetMs(now);
+    if (!record || record.swipe_date !== dateKey) return makeSwipeLimitRecord(identity, dateKey);
+    record.user_id = record.user_id || identity.userId || "";
+    record.worker_id = record.worker_id || identity.workerId || "";
+    record.daily_limit = Number(record.daily_limit || plan.dailyLimit);
+    record.daily_swipe_count = Math.max(0, Number(record.daily_swipe_count || 0));
+    record.total_swipes_today = Math.max(0, Number(record.total_swipes_today || 0));
+    record.cooldown_level = Math.max(0, Number(record.cooldown_level || 0));
+    record.reset_at = record.reset_at || new Date(nextReset).toISOString();
+    if (new Date(record.reset_at).getTime() <= now && record.swipe_date !== dateKey) return makeSwipeLimitRecord(identity, dateKey);
+    if (record.cooldown_until && new Date(record.cooldown_until).getTime() <= now) {
+      record.cooldown_until = null;
+    }
+    record.plan = record.plan || "free";
+    record.worker_plus_enabled = !!record.worker_plus_enabled;
+    return record;
+  }
+  function currentSwipeLimitRecord() {
+    state.workerSwipeLimits = state.workerSwipeLimits || {};
+    var identity = workerSwipeIdentity();
+    var dateKey = indiaDateKey();
+    var key = swipeLimitRecordKey(identity, dateKey);
+    var before = JSON.stringify(state.workerSwipeLimits[key] || {});
+    var record = normalizeSwipeLimitRecord(state.workerSwipeLimits[key], identity, dateKey);
+    state.workerSwipeLimits[key] = record;
+    if (JSON.stringify(record) !== before) save();
+    return record;
+  }
+  function swipeLimitStatus() {
+    var record = currentSwipeLimitRecord();
+    var cooldownUntil = record.cooldown_until ? new Date(record.cooldown_until).getTime() : 0;
+    var now = Date.now();
+    var inCooldown = cooldownUntil > now;
+    return {
+      record: record,
+      inCooldown: inCooldown,
+      cooldownMs: inCooldown ? cooldownUntil - now : 0,
+      remaining: inCooldown ? 0 : Math.max(0, Number(record.daily_limit || 25) - Number(record.daily_swipe_count || 0)),
+      dailyLimit: Number(record.daily_limit || 25)
+    };
+  }
+  function formatCooldownTime(ms) {
+    var minutes = Math.max(1, Math.ceil(Number(ms || 0) / 60000));
+    var hours = Math.floor(minutes / 60);
+    var rest = minutes % 60;
+    if (!hours) return minutes + "m";
+    return hours + "h" + (rest ? " " + rest + "m" : "");
+  }
+  function renderSwipeLimitCounter(status) {
+    status = status || swipeLimitStatus();
+    if (status.inCooldown) return "";
+    var remaining = status.remaining;
+    var text = remaining === status.dailyLimit ? remaining + " swipes available today" : remaining + " swipes left today";
+    var notice = remaining <= 5 ? '<p class="small">' + remaining + ' swipes left today. Choose the best jobs.</p>' : "";
+    return '<div class="swipe-limit-counter ' + (remaining <= 5 ? "warning" : "") + '"><span>' + text + '</span>' + notice + '</div>';
+  }
+  function renderSwipeCooldownCard(status) {
+    status = status || swipeLimitStatus();
+    return '<div class="panel cooldown-card center"><span class="badge amber">Daily swipe balance</span><h3>You\'ve used today\'s fast apply limit.</h3><p class="small">More jobs unlock in ' + formatCooldownTime(status.cooldownMs) + '.</p><p class="small">You can still check Applications, Chat, and Profile.</p><p class="small">Daily swipe limits keep applications serious, so employers get better matches.</p><div class="cooldown-actions"><button class="btn primary" data-go="applications">View Applications</button><button class="btn outline" data-go="profile">Improve Profile</button></div></div>';
+  }
+  function scheduleSwipeCooldownRefresh(status) {
+    clearTimeout(swipeCooldownTimer);
+    if (!status || !status.inCooldown || currentScreen !== "jobs") return;
+    swipeCooldownTimer = setTimeout(function () {
+      renderFeed();
+    }, 30000);
+  }
+  function showSwipeCooldownNotice() {
+    renderFeed();
+    toast("More jobs unlock soon.");
+  }
+  async function persistSwipeLimitRecord(record) {
+    record.updated_at = new Date().toISOString();
+    save();
+    await saveSwipeLimitRemote(record);
+  }
+  async function consumeWorkerSwipe(applied) {
+    var status = swipeLimitStatus();
+    if (status.inCooldown) {
+      showSwipeCooldownNotice();
+      return { allowed: false, cooldown: true };
+    }
+    var record = status.record;
+    var now = Date.now();
+    record.daily_swipe_count = Number(record.daily_swipe_count || 0) + 1;
+    record.total_swipes_today = Number(record.total_swipes_today || 0) + 1;
+    var cooldownStarted = false;
+    if (record.daily_swipe_count >= Number(record.daily_limit || 25)) {
+      record.cooldown_level = Math.min(3, Number(record.cooldown_level || 0) + 1);
+      record.daily_swipe_count = 0;
+      var until = record.cooldown_level === 1 ? now + 2 * 3600000 : (record.cooldown_level === 2 ? now + 8 * 3600000 : new Date(record.reset_at).getTime());
+      record.cooldown_until = new Date(until).toISOString();
+      cooldownStarted = true;
+    }
+    await persistSwipeLimitRecord(record);
+    recordSwipe(!!applied);
+    return { allowed: true, cooldownStarted: cooldownStarted, record: record };
   }
   function show(id) {
     if (!canOpenScreen(id)) {
@@ -1174,16 +1379,29 @@
   }
   function renderFeed() {
     if (!byId("jobFeed")) return;
+    hydrateSwipeLimitRemote(false).then(function (record) {
+      if (record && currentScreen === "jobs") renderFeed();
+    });
+    var swipeStatus = swipeLimitStatus();
+    scheduleSwipeCooldownRefresh(swipeStatus);
+    if (swipeStatus.inCooldown) {
+      byId("jobFeed").innerHTML = renderSwipeCooldownCard(swipeStatus);
+      var cooldownLabel = activeFilter === "remote" ? "Remote" : (activeFilter === "near" ? "Nearby" : (activeCity || state.worker.city || state.user.city || "your city"));
+      if (byId("feedSub")) byId("feedSub").textContent = cooldownLabel;
+      if (byId("selectedCityChip")) byId("selectedCityChip").innerHTML = activeCity ? '<button class="chip selected" data-clear-city>' + activeCity + ' <span>x</span></button>' : "";
+      return;
+    }
     var list = filteredJobs("");
     if (jobIndex >= list.length) jobIndex = 0;
     var variation = swipeCount > 0 && swipeCount % 4 === 0 ? '<div class="panel small">Urgent hiring near you - verified employers only.</div>' : "";
-    byId("jobFeed").innerHTML = list.length ? variation + '<div class="swipe-stack"><div class="stack-card third"></div><div class="stack-card second"></div>' + jobCard(list[jobIndex]) + '</div>' : '<div class="panel center"><h3>No jobs right now - try nearby areas</h3><p class="small">Try widening your choices.</p><button class="btn outline mt" data-go="workerLocation">Update availability</button><button class="btn outline mt" data-refresh-jobs>Refresh</button><button class="btn primary mt" data-go="workerWork">Search another city</button></div>';
+    byId("jobFeed").innerHTML = renderSwipeLimitCounter(swipeStatus) + (list.length ? variation + '<div class="swipe-stack"><div class="stack-card third"></div><div class="stack-card second"></div>' + jobCard(list[jobIndex]) + '</div>' : '<div class="panel center"><h3>No jobs right now - try nearby areas</h3><p class="small">Try widening your choices.</p><button class="btn outline mt" data-worker-home-edit="availability">Update availability</button><button class="btn outline mt" data-refresh-jobs>Refresh</button><button class="btn primary mt" data-worker-home-edit="location">Search another city</button></div>');
     var label = activeFilter === "remote" ? "Remote" : (activeFilter === "near" ? "Nearby" : (activeCity || state.worker.city || state.user.city || "your city"));
     if (byId("feedSub")) byId("feedSub").textContent = label;
     if (byId("selectedCityChip")) byId("selectedCityChip").innerHTML = activeCity ? '<button class="chip selected" data-clear-city>' + activeCity + ' <span>x</span></button>' : "";
   }
   async function applyToJob(id) {
     if (!hasWorkerProfile()) return goToWorkerRoute("jobs");
+    if (swipeLimitStatus().inCooldown) return showSwipeCooldownNotice();
     var today = new Date().toISOString().slice(0, 10);
     if (localStorage.getItem("kkAppliedDate") !== today) {
       appliedToday = 0;
@@ -1192,8 +1410,12 @@
     if (appliedToday >= 100) return toast("Daily application limit reached. Please try again tomorrow.");
     selectedJobId = id || filteredJobs("")[jobIndex].id;
     var selectedJob = state.jobs.find(function (job) { return job.id === selectedJobId; }) || {};
+    if (!selectedJob.id || (selectedJob.status || "approved") !== "approved" || (selectedJob.expiresAt && selectedJob.expiresAt <= Date.now())) {
+      return toast("This job is no longer available.");
+    }
     var exists = state.applications.find(function (a) { return a.jobId === selectedJobId && a.workerId === state.worker.id; });
     var app = exists;
+    if (exists && exists.status !== "Rejected") return toast("Already applied to this job.");
     if (!exists) {
       app = { id: "app-" + Date.now(), jobId: selectedJobId, workerId: state.worker.id, employerId: selectedJob.businessId || selectedJob.employerId || "", status: "Interested", createdAt: Date.now() };
       state.applications.push(app);
@@ -1208,19 +1430,33 @@
     flashJobCard("like");
     toast("Applied");
     if (byId("undoBar")) byId("undoBar").classList.remove("show");
-    recordSwipe(true);
+    var swipeResult = await consumeWorkerSwipe(true);
+    if (!swipeResult.allowed) return;
     setTimeout(function () { toast("Employer will review your profile"); }, 500);
+    if (swipeResult.cooldownStarted) {
+      renderFeed();
+      return;
+    }
     show("applied");
     setTimeout(function () {
       if (currentScreen === "applied") show("jobs");
     }, 5000);
   }
-  function nextJob() {
+  async function nextJob() {
     var list = filteredJobs(byId("jobSearch") ? byId("jobSearch").value : "");
     if (!list.length) return;
+    if (swipeLimitStatus().inCooldown) return showSwipeCooldownNotice();
     lastSwipe = { type: "skip", index: jobIndex };
     flashJobCard("skip");
-    recordSwipe(false);
+    var swipeResult = await consumeWorkerSwipe(false);
+    if (!swipeResult.allowed) return;
+    if (swipeResult.cooldownStarted) {
+      lastSwipe = null;
+      if (byId("undoBar")) byId("undoBar").classList.remove("show");
+      renderFeed();
+      toast("More jobs unlock soon.");
+      return;
+    }
     jobIndex = (jobIndex + 1) % list.length;
     renderFeed();
     toast("Not interested");
@@ -1440,20 +1676,34 @@
       businessLocation: { title: "Location", label: "Search city or area", value: business ? business.city : state.user.city, hint: "Choose the default hiring location.", type: "location" },
       businessType: { title: "Edit Business Type", label: "Business type", value: business ? business.type : state.employer.type, hint: "Example: Retail Shop, Office, Restaurant.", type: "text" }
     };
-    return configs[field] || configs.accountName;
+    var cfg = Object.assign({}, configs[field] || configs.accountName);
+    if (profileEditMode === "home_empty_state_edit" && field === "workerAvailability") {
+      cfg.title = "Update availability";
+      cfg.hint = "Choose when you're available for work.";
+    }
+    if (profileEditMode === "home_empty_state_edit" && field === "workerLocation") {
+      cfg.title = "Search another city";
+      cfg.label = "City, village or area";
+      cfg.hint = "Choose a city, village or area to find nearby jobs.";
+    }
+    return cfg;
   }
   function markEditDirty() {
     editDirty = true;
     document.querySelectorAll("[data-save-profile-edit]").forEach(function (button) { button.disabled = false; });
   }
   function profileEditActionsHtml() {
-    return '<div class="profile-edit-actions"><button class="btn outline" data-cancel-profile-edit>Cancel</button><button class="btn primary" data-save-profile-edit ' + (editDirty ? "" : "disabled") + '>Save Changes</button></div>';
+    var saveLabel = "Save Changes";
+    if (profileEditMode === "home_empty_state_edit" && editingProfileField === "workerAvailability") saveLabel = "Save availability";
+    if (profileEditMode === "home_empty_state_edit" && editingProfileField === "workerLocation") saveLabel = "Save location";
+    return '<div class="profile-edit-actions"><button class="btn outline" data-cancel-profile-edit>Cancel</button><button class="btn primary" data-save-profile-edit ' + (editDirty ? "" : "disabled") + '>' + saveLabel + '</button></div>';
   }
   function setProfileEditSaveState() {
     document.querySelectorAll("[data-save-profile-edit]").forEach(function (button) { button.disabled = !editDirty; });
   }
   function openProfileEdit(field, options) {
     editingProfileField = field;
+    profileEditMode = (options && options.mode) || "edit";
     var cfg = profileEditConfig(field);
     beginEditMode((options && options.returnTo) || currentScreen);
     editDirty = false;
@@ -1467,6 +1717,7 @@
     }
     byId("profileEditTitle").textContent = cfg.title;
     byId("profileEditHint").textContent = cfg.hint;
+    if (byId("profileEditSaveTop")) byId("profileEditSaveTop").textContent = profileEditMode === "home_empty_state_edit" && field === "workerAvailability" ? "Save" : (profileEditMode === "home_empty_state_edit" && field === "workerLocation" ? "Save" : "Save");
     show("profileEdit");
   }
   function openPhotoEdit(options) {
@@ -1584,6 +1835,14 @@
     }
     if (["accountLocation","businessName","contactPerson","employerLocation","businessLocation","businessType"].indexOf(savedField) >= 0) {
       await saveEmployerProfileRemote();
+    }
+    if (returnTarget === "jobs" && ["workerLocation","accountLocation"].indexOf(savedField) >= 0) {
+      activeCity = state.worker.city || state.user.city || "";
+      localStorage.setItem("kkActiveCity", activeCity || "");
+      jobIndex = 0;
+    }
+    if (returnTarget === "jobs" && savedField === "workerAvailability") {
+      jobIndex = 0;
     }
     toast("Updated successfully");
     if (isEditMode) clearEditMode();
@@ -2704,6 +2963,12 @@
       show(homeRoute);
       return;
     }
+    var workerHomeEdit = event.target.closest("[data-worker-home-edit]");
+    if (workerHomeEdit) {
+      var quickField = workerHomeEdit.dataset.workerHomeEdit === "availability" ? "workerAvailability" : "workerLocation";
+      openProfileEdit(quickField, { mode: "home_empty_state_edit", returnTo: "jobs" });
+      return;
+    }
     var go = event.target.closest("[data-go]");
     if (go) {
       var targetRoute = go.dataset.go;
@@ -2955,7 +3220,7 @@
     var applyJob = event.target.closest("[data-apply-job]");
     if (applyJob) { await applyToJob(applyJob.dataset.applyJob); return; }
     var next = event.target.closest("[data-next-job]");
-    if (next) { nextJob(); return; }
+    if (next) { await nextJob(); return; }
     var selectJob = event.target.closest("[data-select-job]");
     if (selectJob) { await applyToJob(selectJob.dataset.selectJob); return; }
     var jobDetail = event.target.closest("[data-job-detail]");
