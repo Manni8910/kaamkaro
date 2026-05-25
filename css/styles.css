@@ -853,6 +853,38 @@ html[lang="hi"] .scene-panel {
 #jobs [data-filter-group] { margin-top: 7px; padding-bottom: 5px; }
 #jobs [data-filter-group] .chip { min-height: 34px; padding: 0 11px; }
 #jobs #feedNotice { margin: 6px 0 8px; padding: 9px 12px; border-radius: 16px; }
+.swipe-limit-counter {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 10px;
+  padding: 10px 13px;
+  border: 1px solid rgba(226, 232, 240, .95);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .88);
+  box-shadow: 0 10px 22px rgba(6, 20, 47, .05);
+}
+.swipe-limit-counter span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 950;
+}
+.swipe-limit-counter.warning {
+  border-color: rgba(230, 162, 52, .28);
+  background: #fffaf0;
+}
+.cooldown-card {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+}
+.cooldown-card h3 {
+  margin: 0;
+}
+.cooldown-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
 
 .swipe-stack { position: relative; min-height: 434px; margin-top: 0; padding-bottom: 18px; }
 .stack-card {
