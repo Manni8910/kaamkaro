@@ -42,6 +42,10 @@
   var swipeCooldownTimer = null;
   var swipeLimitHydrateKey = "";
   var WORKER_PLUS_ENABLED = false;
+  var jobFormMode = "create";
+  var editingJobId = "";
+  var repostSourceJobId = "";
+  var jobFormReturnScreen = "employerDash";
   var workerSwipePlans = {
     free: { dailyLimit: 25, cooldowns: [2 * 3600000, 8 * 3600000], workerPlusEnabled: WORKER_PLUS_ENABLED },
     plus: { dailyLimit: 25, cooldowns: [2 * 3600000, 8 * 3600000], workerPlusEnabled: false }
@@ -80,6 +84,7 @@
       messages: [],
       notifications: [],
       auditLogs: [],
+      jobEditHistory: [],
       moderationLogs: [],
       reports: [],
       ratings: [],
@@ -117,6 +122,7 @@
     conversations: [],
     messages: [],
     notifications: [],
+    jobEditHistory: [],
     workerSwipeLimits: {}
   };
   state.worker = state.worker || { id: "john", name: "", gender: "", age: "", city: "", experience: "", skills: [], availability: "", preferredJob: "Any Job", preferredType: "Full-time", bio: "", phoneVerified: true };
@@ -128,6 +134,7 @@
   if (!Array.isArray(state.jobs) || !state.jobs.length) state.jobs = cloneJobs();
   state.applications = Array.isArray(state.applications) ? state.applications : [];
   state.auditLogs = state.auditLogs || [];
+  state.jobEditHistory = state.jobEditHistory || [];
   state.moderationLogs = state.moderationLogs || [];
   state.reports = state.reports || [];
   state.ratings = state.ratings || [];
@@ -1548,13 +1555,23 @@
     byId("jobDetailTitle").textContent = job.title || "No job selected";
     byId("jobDetailPay").textContent = job.pay || "";
     byId("jobDetailMeta").textContent = job.id ? (job.city + " - " + job.type + " - " + job.employer) : "Post a job to receive applicants.";
+    if (byId("jobDetailActions")) {
+      byId("jobDetailActions").innerHTML = !job.id ? "" : (isLiveEditableJob(job)
+        ? '<button class="btn outline" data-edit-job="' + job.id + '">Manage / Edit Job</button>'
+        : '<button class="btn outline" data-repost-job="' + job.id + '">Repost</button>');
+    }
     var jobApps = job.id ? apps.filter(function (a) { return a.jobId === job.id && (applicantsTab === "accepted" ? ["Accepted","Matched"].indexOf(a.status) >= 0 : ["Interested","Viewed"].indexOf(a.status) >= 0); }) : [];
     var applicantTabs = '<div class="toolbar"><button class="chip ' + (applicantsTab === "new" ? "selected" : "") + '" data-applicants-tab="new">New</button><button class="chip ' + (applicantsTab === "accepted" ? "selected" : "") + '" data-applicants-tab="accepted">Accepted</button></div>';
     byId("applicantList").innerHTML = applicantTabs + (jobApps.length ? jobApps.map(renderApplicantCard).join("") : '<div class="panel small">No applicants in this tab yet.</div>');
     var tabApps = apps.filter(function (a) { return applicantsTab === "accepted" ? ["Accepted","Matched"].indexOf(a.status) >= 0 : ["Interested","Viewed"].indexOf(a.status) >= 0; });
     byId("allApplicants").innerHTML = applicantTabs + (tabApps.length ? tabApps.map(renderApplicantCard).join("") : '<div class="panel small">No applicants in this tab yet.</div>');
     byId("talentCount").textContent = apps.length + " applicants";
-    byId("employerJobsList").innerHTML = jobs.length ? jobs.map(function (j) { return '<div class="list-row"><button class="grow" data-job-detail="' + j.id + '" style="border:0;background:transparent;text-align:left;color:inherit;padding:0"><b>' + j.title + '</b><br><span class="small">' + j.pay + ' - ' + j.city + '</span></button><span class="status-text">' + ((j.status || "approved") === "Expired" ? "Expired" : "Open") + '</span><button class="icon" data-repost-job="' + j.id + '"><svg><use href="#i-plus"></use></svg></button><button class="icon" data-delete-job="' + j.id + '"><svg><use href="#i-trash"></use></svg></button></div>'; }).join("") : '<div class="panel small">Post your first job to see it here.</div>';
+    byId("employerJobsList").innerHTML = jobs.length ? jobs.map(function (j) {
+      var manage = isLiveEditableJob(j)
+        ? '<button class="icon" data-edit-job="' + j.id + '" aria-label="Edit job"><svg><use href="#i-edit"></use></svg></button>'
+        : '<button class="icon" data-repost-job="' + j.id + '" aria-label="Repost job"><svg><use href="#i-plus"></use></svg></button>';
+      return '<div class="list-row"><button class="grow" data-job-detail="' + j.id + '" style="border:0;background:transparent;text-align:left;color:inherit;padding:0"><b>' + j.title + '</b><br><span class="small">' + j.pay + ' - ' + j.city + '</span></button><span class="status-text">' + (isLiveEditableJob(j) ? "Open" : "Expired") + '</span>' + manage + '<button class="icon" data-delete-job="' + j.id + '"><svg><use href="#i-trash"></use></svg></button></div>';
+    }).join("") : '<div class="panel small">Post your first job to see it here.</div>';
   }
   function renderFullWorkerProfile() {
     var app = appForSelected() || { status: "Interested" };
@@ -2211,6 +2228,188 @@
     var period = byId("postPayPeriod").value;
     return amount && period ? "Rs " + amount + " " + period : "";
   }
+  function postPayPeriodFor(pay) {
+    var value = String(pay || "").toLowerCase();
+    if (value.indexOf("day") >= 0) return "Per Day";
+    if (value.indexOf("week") >= 0) return "Per Week";
+    if (value.indexOf("year") >= 0) return "Per Year";
+    return "Per Month";
+  }
+  function isLiveEditableJob(job) {
+    if (!isEmployerJob(job)) return false;
+    if (["expired","deleted","removed","rejected"].indexOf(String(job.status || "").toLowerCase()) >= 0) return false;
+    return !job.expiresAt || Number(job.expiresAt) > Date.now();
+  }
+  function setPostTypeValue(value) {
+    var select = byId("postType");
+    if (!select) return;
+    var wanted = normalizedPostText(value).replace(/-/g, " ");
+    var option = Array.from(select.options).find(function (item) {
+      return normalizedPostText(item.value).replace(/-/g, " ") === wanted;
+    });
+    select.value = option ? option.value : "Full Time";
+  }
+  function clearPostJobForm() {
+    ["postTitle","postPayAmount","postLocation","postShift","postDesc","postRequirements"].forEach(function (id) {
+      if (byId(id)) byId(id).value = "";
+    });
+    if (byId("postPayPeriod")) byId("postPayPeriod").value = "Per Month";
+    if (byId("postOpenings")) byId("postOpenings").value = "1";
+    setPostTypeValue("Full Time");
+    delete selectedLocations.postJob;
+    resetVisibilityChoice();
+    renderPostDescCounter();
+  }
+  function fillPostJobForm(job) {
+    if (!job) return;
+    byId("postTitle").value = job.title || "";
+    byId("postPayAmount").value = String(job.pay || "").replace(/[^\d]/g, "");
+    byId("postPayPeriod").value = postPayPeriodFor(job.pay);
+    byId("postLocation").value = job.formatted_location || job.city || "";
+    selectedLocations.postJob = selectedLocationFromInput(byId("postLocation").value) || selectedLocationFromPlaceId(job.place_id) || normalizeLocation(job);
+    setPostTypeValue(job.type || "Full Time");
+    byId("postShift").value = job.shift || "";
+    byId("postOpenings").value = String(job.openings || 1);
+    byId("postDesc").value = job.desc || "";
+    byId("postRequirements").value = job.requirements || "";
+    renderPostDescCounter();
+  }
+  function renderPostJobMode() {
+    if (!byId("postJobHeading")) return;
+    var editing = jobFormMode === "edit";
+    var reposting = jobFormMode === "repost";
+    byId("postJobTag").textContent = editing ? "Edit Job" : (reposting ? "Repost" : "Post Job");
+    byId("postJobHeading").textContent = editing ? "Edit live job" : (reposting ? "Repost job" : "Post a job");
+    byId("postJobRuleCopy").textContent = editing
+      ? "Update the live job details below."
+      : "Free job stays live for 15 days. You can post 1 free job every 30 days.";
+    byId("postEditWarning").hidden = !editing;
+    byId("postJobContinue").textContent = editing ? "Save changes" : "Continue";
+  }
+  function openCreateJob(returnTo) {
+    jobFormMode = "create";
+    editingJobId = "";
+    repostSourceJobId = "";
+    jobFormReturnScreen = returnTo || "employerDash";
+    clearPostJobForm();
+    renderPostJobMode();
+    show("postJob");
+  }
+  function openEditJob(jobId) {
+    var job = state.jobs.find(function (item) { return item.id === jobId; });
+    if (!isEmployerJob(job)) return toast("You can only edit your own jobs.");
+    if (!isLiveEditableJob(job)) return toast("This job has expired. Repost it to start a new live period.");
+    jobFormMode = "edit";
+    editingJobId = job.id;
+    repostSourceJobId = "";
+    jobFormReturnScreen = currentScreen === "employerJobs" ? "employerJobs" : "employerJobDetail";
+    fillPostJobForm(job);
+    renderPostJobMode();
+    show("postJob");
+  }
+  function openRepostJob(jobId) {
+    var job = state.jobs.find(function (item) { return item.id === jobId; });
+    if (!isEmployerJob(job)) return toast("You can only repost your own jobs.");
+    if (isLiveEditableJob(job)) return toast("This job is still live. Use Edit Job instead.");
+    jobFormMode = "repost";
+    editingJobId = "";
+    repostSourceJobId = job.id;
+    jobFormReturnScreen = currentScreen === "employerJobDetail" ? "employerJobDetail" : "employerJobs";
+    fillPostJobForm(job);
+    renderPostJobMode();
+    show("postJob");
+  }
+  function editableJobSnapshot(job) {
+    return {
+      title: job.title || "",
+      pay: job.pay || "",
+      city: job.city || "",
+      district: job.district || "",
+      state: job.state || "",
+      formatted_location: job.formatted_location || "",
+      type: job.type || "",
+      shift: job.shift || "",
+      openings: Number(job.openings || 1),
+      desc: job.desc || "",
+      requirements: job.requirements || ""
+    };
+  }
+  function textTokens(value) {
+    return normalizedPostText(value).split(/[^a-z0-9]+/).filter(function (token) { return token.length > 2; });
+  }
+  function unrelatedText(before, after) {
+    var oldTokens = textTokens(before);
+    var newTokens = textTokens(after);
+    if (oldTokens.length < 8 || newTokens.length < 8) return false;
+    var overlap = oldTokens.filter(function (token) { return newTokens.indexOf(token) >= 0; }).length;
+    return overlap / Math.min(oldTokens.length, newTokens.length) < 0.25;
+  }
+  function titleChangedCompletely(before, after) {
+    var oldTitle = normalizedPostText(before);
+    var newTitle = normalizedPostText(after);
+    if (!oldTitle || !newTitle || oldTitle === newTitle || oldTitle.indexOf(newTitle) >= 0 || newTitle.indexOf(oldTitle) >= 0) return false;
+    return unrelatedText(oldTitle, newTitle) || textTokens(oldTitle).every(function (token) { return textTokens(newTitle).indexOf(token) < 0; });
+  }
+  function jobEditChangeType(job, draft) {
+    var location = draft.location || {};
+    return titleChangedCompletely(job.title, draft.title)
+      || normalizedPostText(job.city) !== normalizedPostText(location.city)
+      || (job.state && normalizedPostText(job.state) !== normalizedPostText(location.state))
+      || postPayPeriodFor(job.pay) !== byId("postPayPeriod").value
+      || normalizedPostText(job.type).replace(/-/g, " ") !== normalizedPostText(draft.type).replace(/-/g, " ")
+      || unrelatedText(job.desc, draft.desc)
+      ? "major"
+      : "minor";
+  }
+  async function saveEditedJob() {
+    var job = state.jobs.find(function (item) { return item.id === editingJobId; });
+    if (!isEmployerJob(job)) return toast("You can only edit your own jobs.");
+    if (!isLiveEditableJob(job)) return toast("This job has expired. Repost it to start a new live period.");
+    var draft = validateJobDraft();
+    if (!draft) return;
+    var moderation = analyzeJobDraft(draft, job.id);
+    if (moderation.rejected) return toast("This job update cannot be saved. Please review posting rules.");
+    var before = editableJobSnapshot(job);
+    var changeType = jobEditChangeType(job, draft);
+    var location = draft.location;
+    Object.assign(job, {
+      title: draft.title,
+      pay: draft.pay,
+      city: location.city,
+      district: location.district,
+      state: location.state,
+      country: location.country,
+      formatted_location: location.formatted_location,
+      place_id: location.place_id,
+      lat: location.lat,
+      lng: location.lng,
+      type: draft.type,
+      remote: draft.type === "Remote",
+      shift: draft.shift,
+      openings: draft.openings,
+      desc: draft.desc,
+      requirements: draft.requirements,
+      updatedAt: Date.now()
+    });
+    if (changeType === "major") job.status = "pending_review";
+    state.jobEditHistory.unshift({
+      id: "job-edit-" + Date.now(),
+      jobId: job.id,
+      employerId: state.defaultBusinessId,
+      editedByUserId: state.user.id,
+      oldValues: before,
+      newValues: editableJobSnapshot(job),
+      changeType: changeType,
+      createdAt: Date.now()
+    });
+    state.jobEditHistory = state.jobEditHistory.slice(0, 100);
+    audit("job_edited_" + changeType, changeType === "major" ? "Major job edit queued for review" : "Live job updated", job, state.user.id);
+    save();
+    await saveJobRemote(job);
+    selectedJobId = job.id;
+    show(jobFormReturnScreen || "employerDash");
+    toast(changeType === "major" ? "Job updated and sent for review." : "Job updated.");
+  }
   function employerPostCount() {
     return employerJobs(true).length;
   }
@@ -2249,18 +2448,18 @@
     }
     return { ok: true };
   }
-  function duplicatePostExists(draft) {
+  function duplicatePostExists(draft, excludeJobId) {
     var title = normalizedPostText(draft.title);
     var desc = normalizedPostText(draft.desc);
     var jobDuplicate = employerJobs(true).some(function (job) {
-      return normalizedPostText(job.title) === title && normalizedPostText(job.desc) === desc;
+      return job.id !== excludeJobId && normalizedPostText(job.title) === title && normalizedPostText(job.desc) === desc;
     });
     var historyDuplicate = (state.postingHistory || []).some(function (item) {
       return item.businessId === state.defaultBusinessId && normalizedPostText(item.title) === title && normalizedPostText(item.desc) === desc;
     });
     return jobDuplicate || historyDuplicate;
   }
-  function analyzeJobDraft(draft) {
+  function analyzeJobDraft(draft, excludeJobId) {
     var text = [
       draft.title,
       draft.desc,
@@ -2282,7 +2481,7 @@
     });
     var amount = Number((byId("postPayAmount").value || "").replace(/[^\d]/g, ""));
     if (amount && amount > 80000 && draft.desc.length < 80) reasons.push("Very high pay with vague work");
-    if (duplicatePostExists(draft)) {
+    if (duplicatePostExists(draft, excludeJobId)) {
       rejected = true;
       reasons.push("Duplicate job post");
     }
@@ -2316,6 +2515,7 @@
       renderLegal,
       renderNotifications,
       renderJobReview,
+      renderPostJobMode,
       renderPostDescCounter,
       expireInactiveMatches,
       renderHeroDynamicCard,
@@ -2430,7 +2630,17 @@
       return toast("Please add at least 15 words so workers understand the job clearly.");
     }
     if (byId("postDescError")) byId("postDescError").style.display = "none";
-    return { title: title, pay: pay, city: location.city, location: location, desc: desc, type: byId("postType").value };
+    return {
+      title: title,
+      pay: pay,
+      city: location.city,
+      location: location,
+      desc: desc,
+      type: byId("postType").value,
+      shift: byId("postShift").value.trim(),
+      openings: Math.max(1, Number(byId("postOpenings").value || 1)),
+      requirements: byId("postRequirements").value.trim()
+    };
   }
   async function addPostedJob() {
     if (!hasEmployerProfile()) return goToEmployerRoute("postJob");
@@ -2449,7 +2659,7 @@
       return toast("Please confirm the job is genuine before publishing.");
     }
     byId("jobRulesError").style.display = "none";
-    var moderation = analyzeJobDraft(draft);
+    var moderation = analyzeJobDraft(draft, repostSourceJobId);
     if (moderation.rejected) {
       var rejectedBusiness = currentBusinessProfile();
       audit("rejected", moderation.reasons.join(", "), { id: "draft-" + Date.now(), title: draft.title, pay: draft.pay, city: draft.city, type: draft.type, employer: rejectedBusiness ? rejectedBusiness.businessName : "Business", desc: draft.desc, status: "rejected" }, "system");
@@ -2461,8 +2671,12 @@
     var business = currentBusinessProfile();
     var postLocation = draft.location;
     var created = Date.now();
-    var job = { id: "job-" + created, businessId: state.defaultBusinessId, employerId: state.defaultBusinessId, companyName: business.businessName, title: draft.title, pay: draft.pay, city: postLocation.city, district: postLocation.district, state: postLocation.state, formatted_location: postLocation.formatted_location, distance: "Nearby", type: draft.type, employer: business.businessName, badge: postVisibility === "boost" ? "Urgent" : "New", visibility: postVisibility, remote: draft.type === "Remote", desc: draft.desc, status: status, riskScore: moderation.riskScore, flagReasons: moderation.reasons, reportCount: 0, previousPosts: employerPostCount(), createdAt: created, expiresAt: needsPayment ? null : created + 15 * 86400000, paymentVerified: !needsPayment };
+    var job = { id: "job-" + created, businessId: state.defaultBusinessId, employerId: state.defaultBusinessId, companyName: business.businessName, title: draft.title, pay: draft.pay, city: postLocation.city, district: postLocation.district, state: postLocation.state, formatted_location: postLocation.formatted_location, place_id: postLocation.place_id, lat: postLocation.lat, lng: postLocation.lng, distance: "Nearby", type: draft.type, shift: draft.shift, openings: draft.openings, requirements: draft.requirements, employer: business.businessName, badge: postVisibility === "boost" ? "Urgent" : "New", visibility: postVisibility, remote: draft.type === "Remote", desc: draft.desc, status: status, riskScore: moderation.riskScore, flagReasons: moderation.reasons, reportCount: 0, previousPosts: employerPostCount(), repostedFromJobId: repostSourceJobId || "", createdAt: created, expiresAt: needsPayment ? null : created + 15 * 86400000, paymentVerified: !needsPayment };
     state.jobs.unshift(job);
+    if (repostSourceJobId) {
+      var repostSource = state.jobs.find(function (item) { return item.id === repostSourceJobId; });
+      if (repostSource) repostSource.repostCount = Number(repostSource.repostCount || 0) + 1;
+    }
     save();
     var remoteJob = await saveJobRemote(job);
     if (needsPayment) {
@@ -2489,6 +2703,9 @@
     save();
     audit(job.status === "approved" ? "approved" : "pending_review", job.status === "approved" ? "Auto-approved" : moderation.reasons.join(", "), job, "system");
     track(postVisibility === "boost" ? "employer_job_boosted_posted" : "employer_job_free_posted");
+    jobFormMode = "create";
+    repostSourceJobId = "";
+    editingJobId = "";
     show("published");
   }
   function openPublishConfirmation() {
@@ -2602,21 +2819,12 @@
     if (openConversation) { selectedConversationId = openConversation.dataset.openConversation; show("chat"); return; }
     var dashboardTarget = event.target.closest("[data-dashboard-target]");
     if (dashboardTarget) { applicantsTab = dashboardTarget.dataset.dashboardTarget; show("applicants"); return; }
+    if (event.target.closest("[data-new-job]")) { openCreateJob("employerDash"); return; }
+    if (event.target.closest("[data-post-job-back]")) { show(jobFormReturnScreen || "employerDash"); return; }
+    var editJob = event.target.closest("[data-edit-job]");
+    if (editJob) { openEditJob(editJob.dataset.editJob); return; }
     var repostJob = event.target.closest("[data-repost-job]");
-    if (repostJob) {
-      var repost = state.jobs.find(function (job) { return job.id === repostJob.dataset.repostJob; });
-      if (repost) {
-        byId("postTitle").value = repost.title || "";
-        byId("postPayAmount").value = String(repost.pay || "").replace(/[^\d]/g, "");
-        byId("postLocation").value = repost.formatted_location || repost.city || "";
-        selectedLocations.postJob = selectedLocationFromInput(byId("postLocation").value) || selectedLocationFromPlaceId(repost.place_id) || normalizeLocation(repost);
-        byId("postType").value = repost.type || "Full Time";
-        byId("postDesc").value = repost.desc || "";
-        renderPostDescCounter();
-        show("postJob");
-      }
-      return;
-    }
+    if (repostJob) { openRepostJob(repostJob.dataset.repostJob); return; }
     var deleteJob = event.target.closest("[data-delete-job]");
     if (deleteJob) {
       openModal("Delete this job?", '<p class="small">This job will be removed from the employer job list.</p><div class="btn-row mt"><button class="btn outline" data-close-modal>Cancel</button><button class="btn danger" data-confirm-delete-job="' + deleteJob.dataset.deleteJob + '">Delete</button></div>');
@@ -2972,6 +3180,10 @@
     var go = event.target.closest("[data-go]");
     if (go) {
       var targetRoute = go.dataset.go;
+      if (targetRoute === "postJob" && currentScreen !== "jobVisibility") {
+        openCreateJob(currentScreen === "employerJobDetail" ? "employerJobDetail" : "employerDash");
+        return;
+      }
       if (isEditMode && (currentScreen === "profileEdit" || currentScreen === "verifyId") && unsafeEditReturnScreen(targetRoute)) {
         returnFromEditMode();
         return;
@@ -3241,7 +3453,10 @@
     if (event.target.closest("[data-reject-current]")) { await setApplicationStatus(null, "Rejected"); return; }
     if (event.target.closest("[data-accept-current]")) { await setApplicationStatus(null, "Accepted"); return; }
     if (event.target.closest("[data-review-job]")) {
-      if (validateJobDraft()) { resetVisibilityChoice(); show("jobVisibility"); }
+      if (validateJobDraft()) {
+        if (jobFormMode === "edit") await saveEditedJob();
+        else { resetVisibilityChoice(); show("jobVisibility"); }
+      }
       return;
     }
     if (event.target.closest("[data-post-job]")) { openPublishConfirmation(); return; }

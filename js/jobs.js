@@ -62,9 +62,16 @@
       city: row.city || "",
       district: row.district || "",
       state: row.state || "",
+      country: row.country || "India",
       formatted_location: row.formatted_location || row.city || "",
+      place_id: row.place_id || "",
+      lat: row.lat == null ? null : Number(row.lat),
+      lng: row.lng == null ? null : Number(row.lng),
       distance: row.is_remote ? "Remote" : "Nearby",
-      type: row.is_remote ? "Remote" : "Full Time",
+      type: row.job_type || (row.is_remote ? "Remote" : "Full Time"),
+      shift: row.work_timing || "",
+      openings: Number(row.openings || 1),
+      requirements: row.requirements || "",
       employer: company,
       badge: row.boosted ? "Urgent" : "New",
       visibility: row.post_type === "boosted" ? "boost" : "free",
@@ -76,7 +83,9 @@
       riskScore: row.risk_score || 0,
       reportCount: row.reports_count || 0,
       createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
-      expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : null
+      expiresAt: row.expires_at ? new Date(row.expires_at).getTime() : null,
+      repostedFromJobId: row.reposted_from_job_id || "",
+      repostCount: Number(row.repost_count || 0)
     };
   }
 
@@ -108,16 +117,24 @@
       city: job.city || "",
       district: job.district || "",
       state: job.state || "",
+      country: job.country || "India",
       formatted_location: job.formatted_location || job.city || "",
+      place_id: job.place_id || "",
       lat: job.lat || null,
       lng: job.lng || null,
       is_remote: !!job.remote,
+      job_type: job.type || "Full Time",
+      work_timing: job.shift || "",
+      openings: Number(job.openings || 1),
+      requirements: job.requirements || "",
       status: statusToRemote(job.status),
       boosted: job.visibility === "boost" && job.paymentVerified === true,
       post_type: job.visibility === "boost" ? "boosted" : "free",
       risk_score: job.riskScore || 0,
       reports_count: job.reportCount || 0,
-      expires_at: job.paymentVerified === false ? null : (job.expiresAt ? new Date(job.expiresAt).toISOString() : new Date(Date.now() + (job.visibility === "boost" ? 28 : 15) * 86400000).toISOString())
+      expires_at: job.paymentVerified === false ? null : (job.expiresAt ? new Date(job.expiresAt).toISOString() : new Date(Date.now() + (job.visibility === "boost" ? 28 : 15) * 86400000).toISOString()),
+      reposted_from_job_id: /^[0-9a-f-]{36}$/i.test(String(job.repostedFromJobId || "")) ? job.repostedFromJobId : null,
+      repost_count: Number(job.repostCount || 0)
     };
     var query = supabase.from("jobs");
     var result = /^[0-9a-f-]{36}$/i.test(String(job.id || ""))
