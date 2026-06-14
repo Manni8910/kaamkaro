@@ -26,6 +26,13 @@ test.describe("backend trust and safety guardrails", () => {
     expect(schema).toContain("create or replace function public.enforce_application_job_rules");
     expect(schema).toContain("create or replace function public.enforce_application_status_rules");
     expect(schema).toContain("create or replace function public.enforce_chat_unlock_rules");
+    expect(schema).toContain("create table if not exists public.worker_swipe_limits");
+    expect(schema).toContain("create table if not exists public.job_edit_history");
+    expect(schema).toContain("create or replace function public.log_job_edit_history");
+    expect(schema).toContain("after update on public.jobs");
+    expect(schema).toContain('create policy "job_edit_history_select_own_or_admin"');
+    expect(schema).toContain("cooldown_level integer");
+    expect(schema).toContain("unique (user_id, swipe_date)");
     expect(schema).toContain("registration fee");
     expect(schema).toContain("security deposit");
     expect(schema).toContain("adult service");
@@ -38,11 +45,29 @@ test.describe("backend trust and safety guardrails", () => {
 
     expect(patch).toContain("alter table public.users add column if not exists device_id text");
     expect(patch).toContain("create table if not exists public.security_events");
+    expect(patch).toContain("create table if not exists public.worker_swipe_limits");
+    expect(patch).toContain("create table if not exists public.job_edit_history");
+    expect(patch).toContain("create or replace function public.log_job_edit_history");
+    expect(patch).toContain('create policy "job_edit_history_select_own_or_admin"');
+    expect(patch).toContain('create policy "worker_swipe_limits_select_own_or_admin"');
     expect(patch).toContain("alter table public.security_events enable row level security");
     expect(patch).toContain('create policy "security_events_admin"');
     expect(patch).toContain('create policy "security_events_insert_own"');
     expect(patch).not.toMatch(/for\s+select\s+using\s+\(true\)/i);
     expect(patch).not.toMatch(/for\s+all\s+using\s+\(true\)/i);
+  });
+
+  test("live job edit migration preserves strict ownership and server-side history", () => {
+    const migration = read("backend/job_edit_feature.sql");
+
+    expect(migration).toContain("create table if not exists public.job_edit_history");
+    expect(migration).toContain("create or replace function public.log_job_edit_history");
+    expect(migration).toContain("after update on public.jobs");
+    expect(migration).toContain("old_values jsonb");
+    expect(migration).toContain("new_values jsonb");
+    expect(migration).toContain('create policy "job_edit_history_select_own_or_admin"');
+    expect(migration).not.toMatch(/for\s+select\s+using\s+\(true\)/i);
+    expect(migration).not.toMatch(/for\s+all\s+using\s+\(true\)/i);
   });
 
   test("Railway backend owns sensitive moderation and review actions", () => {
